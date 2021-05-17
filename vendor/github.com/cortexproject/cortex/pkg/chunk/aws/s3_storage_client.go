@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -50,12 +51,16 @@ var (
 	}, []string{"operation", "status_code"}))
 )
 
+var anyscalePrefix = ""
+
 // InjectRequestMiddleware gives users of this client the ability to make arbitrary
 // changes to outgoing requests.
 type InjectRequestMiddleware func(next http.RoundTripper) http.RoundTripper
 
 func init() {
 	s3RequestDuration.Register()
+
+	anyscalePrefix = os.Getenv("ANYSCALE_KEY_PREFIX")
 }
 
 // S3Config specifies config for storing chunks on AWS S3.
@@ -285,6 +290,9 @@ func (a *S3ObjectClient) Stop() {}
 
 // DeleteObject deletes the specified objectKey from the appropriate S3 bucket
 func (a *S3ObjectClient) DeleteObject(ctx context.Context, objectKey string) error {
+	objectKey = anyscalePrefix + objectKey
+	fmt.Println(" - DEBUG - delete object: " + objectKey)
+
 	_, err := a.S3.DeleteObject(&s3.DeleteObjectInput{
 		Bucket: aws.String(a.bucketFromKey(objectKey)),
 		Key:    aws.String(objectKey),
@@ -318,6 +326,9 @@ func (a *S3ObjectClient) bucketFromKey(key string) string {
 // GetObject returns a reader for the specified object key from the configured S3 bucket. If the
 // key does not exist a generic chunk.ErrStorageObjectNotFound error is returned.
 func (a *S3ObjectClient) GetObject(ctx context.Context, objectKey string) (io.ReadCloser, error) {
+	objectKey = anyscalePrefix + objectKey
+	fmt.Println(" - DEBUG - get object: " + objectKey)
+
 	var resp *s3.GetObjectOutput
 
 	// Map the key into a bucket
@@ -346,6 +357,9 @@ func (a *S3ObjectClient) GetObject(ctx context.Context, objectKey string) (io.Re
 
 // PutObject into the store
 func (a *S3ObjectClient) PutObject(ctx context.Context, objectKey string, object io.ReadSeeker) error {
+	objectKey = anyscalePrefix + objectKey
+	fmt.Println(" - DEBUG - put object: " + objectKey)
+
 	return instrument.CollectedRequest(ctx, "S3.PutObject", s3RequestDuration, instrument.ErrorCode, func(ctx context.Context) error {
 		putObjectInput := &s3.PutObjectInput{
 			Body:   object,
@@ -366,6 +380,9 @@ func (a *S3ObjectClient) PutObject(ctx context.Context, objectKey string, object
 
 // List implements chunk.ObjectClient.
 func (a *S3ObjectClient) List(ctx context.Context, prefix, delimiter string) ([]chunk.StorageObject, []chunk.StorageCommonPrefix, error) {
+	prefix = anyscalePrefix + prefix
+	fmt.Println(" - DEBUG - list object: " + prefix)
+
 	var storageObjects []chunk.StorageObject
 	var commonPrefixes []chunk.StorageCommonPrefix
 
@@ -385,13 +402,14 @@ func (a *S3ObjectClient) List(ctx context.Context, prefix, delimiter string) ([]
 
 				for _, content := range output.Contents {
 					storageObjects = append(storageObjects, chunk.StorageObject{
-						Key:        *content.Key,
+						Key:        strings.TrimPrefix(*content.Key, anyscalePrefix),
 						ModifiedAt: *content.LastModified,
 					})
 				}
 
 				for _, commonPrefix := range output.CommonPrefixes {
-					commonPrefixes = append(commonPrefixes, chunk.StorageCommonPrefix(aws.StringValue(commonPrefix.Prefix)))
+					prefix := strings.TrimPrefix(*commonPrefix.Prefix, anyscalePrefix)
+					commonPrefixes = append(commonPrefixes, chunk.StorageCommonPrefix(aws.StringValue(&prefix)))
 				}
 
 				if output.IsTruncated == nil || !*output.IsTruncated {
