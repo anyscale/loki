@@ -26,7 +26,7 @@ import (
 
 const (
 	// create a new db sharded by time based on when write request is received
-	ShardDBsByDuration = 15 * time.Minute
+	ShardDBsByDuration = 1 * time.Minute
 
 	// a temp file is created during uploads with name of the db + tempFileSuffix
 	tempFileSuffix = ".temp"
